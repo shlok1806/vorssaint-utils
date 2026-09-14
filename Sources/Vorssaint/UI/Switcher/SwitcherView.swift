@@ -335,8 +335,13 @@ struct SwitcherView: View {
                         .onChange(of: switcher.selectedIndex) { _, _ in
                             revealSelection(in: proxy, animated: true)
                         }
-                        .onChange(of: switcher.iconRowLayout.previewContentWidth) { _, _ in
+                        .onChange(of: appWindows.map(\.element.id)) { _, _ in
                             revealSelection(in: proxy, animated: true)
+                        }
+                        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { _ in
+                            DispatchQueue.main.async {
+                                revealSelection(in: proxy, animated: true)
+                            }
                         }
                     }
                 }
@@ -421,8 +426,13 @@ struct SwitcherView: View {
                     .onChange(of: switcher.selectedIndex) { _, _ in
                         revealSelection(in: proxy, animated: true)
                     }
-                    .onChange(of: iconRowContentWidth) { _, _ in
+                    .onChange(of: appWindows.map(\.element.id)) { _, _ in
                         revealSelection(in: proxy, animated: true)
+                    }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { _ in
+                        DispatchQueue.main.async {
+                            revealSelection(in: proxy, animated: true)
+                        }
                     }
                 }
                 .frame(height: 25 * SwitcherIconRowLayout.scale)
@@ -551,10 +561,10 @@ struct SwitcherView: View {
         return switcher.windows[switcher.selectedIndex]
     }
 
-    /// Scrolls the selected window into view. Runs on appear, when the
-    /// selection moves, and when the strip it sits in changes width: search
-    /// drops apps from the row, the strips are sized from the row, and a
-    /// narrower strip can leave an unchanged selection outside it.
+    /// A search can resize the strip without moving the selection, and closing
+    /// a window can replace the selected item at the same index. Reveal after
+    /// the viewport's actual geometry changes, allowing its native scroll view
+    /// to finish resizing before the queued reveal reads the current selection.
     private func revealSelection(in proxy: ScrollViewProxy, animated: Bool) {
         let index = switcher.selectedIndex
         guard switcher.windows.indices.contains(index) else { return }
