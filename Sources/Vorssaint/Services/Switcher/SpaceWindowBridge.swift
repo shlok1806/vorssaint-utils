@@ -36,6 +36,23 @@ enum SpaceWindowBridge {
         return unsafeBitCast(symbol, to: GetWindowTagsFunction.self)
     }()
 
+    private typealias WindowIsOrderedInFunction =
+        @convention(c) (ConnectionID, CGWindowID, UnsafeMutablePointer<UInt8>) -> CGError
+    private static let windowIsOrderedIn: WindowIsOrderedInFunction? = {
+        guard let symbol = symbol("CGSWindowIsOrderedIn") else { return nil }
+        return unsafeBitCast(symbol, to: WindowIsOrderedInFunction.self)
+    }()
+
+    /// Unlike on-screen visibility, ordering survives a move to another desktop.
+    /// A dismissed surface can retain its desktop assignment without being ordered.
+    /// Keep an unavailable query distinct from an explicit ordered-out answer.
+    static func isWindowOrderedIn(_ windowID: CGWindowID) -> Bool? {
+        guard connection != 0, let windowIsOrderedIn else { return nil }
+        var ordered: UInt8 = 0
+        guard windowIsOrderedIn(connection, windowID, &ordered) == .success else { return nil }
+        return ordered != 0
+    }
+
     // MARK: - Space membership
 
     private typealias CopySpacesFunction =
@@ -236,12 +253,11 @@ enum SpaceWindowBridge {
     /// caller can fall back to app-level activation.
     @discardableResult
     static func frontWindow(_ windowID: CGWindowID, ownerPID: pid_t) -> Bool {
-        guard let setFrontProcess, let processForPID else { return false }
+        guard let setFrontProcess, let processForPID, let postEventRecord else { return false }
         var psn = ProcessSerialNumber()
         guard processForPID(ownerPID, &psn) == noErr else { return false }
         let userGenerated: UInt32 = 0x200
         guard setFrontProcess(&psn, windowID, userGenerated) == .success else { return false }
-        guard let postEventRecord else { return true }
         var targetID = windowID
         var clickPoint = CGPoint(x: -1, y: -1)
         var record = [UInt8](repeating: 0, count: 0x100)
@@ -250,10 +266,10 @@ enum SpaceWindowBridge {
         withUnsafeBytes(of: &targetID) { record.replaceSubrange(0x3c..<0x3c + $0.count, with: $0) }
         withUnsafeBytes(of: &clickPoint) { record.replaceSubrange(0x20..<0x20 + $0.count, with: $0) }
         record[0x08] = 0x01 // left mouse down…
-        _ = postEventRecord(&psn, &record)
+        let down = postEventRecord(&psn, &record)
         record[0x08] = 0x02 // …then up: the pair makes the window key
-        _ = postEventRecord(&psn, &record)
-        return true
+        let up = postEventRecord(&psn, &record)
+        return down == .success && up == .success
     }
 
     // MARK: - The user's "move a space" shortcut
