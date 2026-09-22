@@ -13284,6 +13284,15 @@ struct MetricsTests {
             let values = Mirror(reflecting: strings).children.compactMap { $0.value as? String }
             expect(values.allSatisfy { !$0.contains("\u{2014}") },
                    "no em-dash in visible strings (\(language.rawValue))")
+            // The placement this picker sets sends apps hidden with Cmd+H to
+            // the end or out of the list along with minimized windows, so a
+            // label naming only windows describes half of what it does. The
+            // language's own word for apps is taken from the switcher's own
+            // hint rather than written out again here.
+            expect(strings.switcherMinimizedPlacementLabel
+                .localizedCaseInsensitiveContains(strings.switcherShortcutHintApps),
+                   "the minimized placement label says it covers hidden apps too "
+                   + "(\(language.rawValue): \(strings.switcherMinimizedPlacementLabel))")
         }
         // The system writes an apostrophe as a curled mark, and so does every
         // string here now: five hundred and ninety-nine of them were typewriter
