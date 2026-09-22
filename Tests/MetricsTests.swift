@@ -13003,8 +13003,11 @@ struct MetricsTests {
         let loginShell = HomebrewEnvironment.loginShellCommand(shellPath: "/bin/zsh")
         expect(loginShell.executable == "/bin/zsh"
                 && loginShell.arguments.contains("-l")
-                && loginShell.arguments.last == "/usr/bin/env -0",
-               "Homebrew asks the user's shell as a login shell for a NUL-separated environment")
+                && loginShell.arguments.contains("-i")
+                && (loginShell.arguments.last?.hasSuffix("/usr/bin/env -0") ?? false)
+                && (loginShell.arguments.last?.contains(HomebrewEnvironment.dumpMarker) ?? false),
+               "Homebrew asks the user's shell as a login and interactive shell, so ~/.zshrc is read too, "
+               + "and marks where the NUL-separated environment starts")
         let envDump = Data(("HOME=/Users/test\0https_proxy=http://127.0.0.1:7890\0MULTI=a\nb\0"
                             + "EQUALS=x=y\0EMPTY=\0noequals\0Welcome back\nHOMEBREW_API_DOMAIN=https://mirror.example/api\0").utf8)
         let parsedEnvironment = HomebrewEnvironment.parse(nullSeparated: envDump)
@@ -13019,6 +13022,22 @@ struct MetricsTests {
         expect(!parsedEnvironment.keys.contains { $0.contains("Welcome") || $0.hasPrefix("HOMEBREW_") },
                "Homebrew environment parser drops an entry whose name is not an identifier, "
                + "such as startup output glued to the variable behind it")
+        // What a real `bash -i` does: "no job control in this shell" on the shared
+        // pipe, with no NUL of its own, so the first variable rides in behind it.
+        let noisyDump = Data(("bash: no job control in this shell\nWelcome back\n"
+                              + HomebrewEnvironment.dumpMarker
+                              + "https_proxy=http://127.0.0.1:7890\0HOMEBREW_API_DOMAIN=https://mirror.example/api\0").utf8)
+        let parsedNoisy = HomebrewEnvironment.parse(nullSeparated: noisyDump)
+        expectEqual(parsedNoisy["https_proxy"] ?? "", "http://127.0.0.1:7890",
+                    "Homebrew keeps the first variable of the dump when a startup file printed before it")
+        expectEqual(parsedNoisy["HOMEBREW_API_DOMAIN"] ?? "", "https://mirror.example/api",
+                    "Homebrew reads the rest of a dump that startup output preceded")
+        expect(parsedNoisy.count == 2,
+               "Homebrew takes nothing a startup file printed as a variable, found \(parsedNoisy.keys.sorted())")
+        let echoedMarker = Data(("startup echoed " + HomebrewEnvironment.dumpMarker + " itself\n"
+                                 + HomebrewEnvironment.dumpMarker + "no_proxy=localhost\0").utf8)
+        expectEqual(HomebrewEnvironment.parse(nullSeparated: echoedMarker)["no_proxy"] ?? "", "localhost",
+                    "Homebrew takes the last marker, so a startup file echoing it cannot cut the dump short")
         let passedThrough = HomebrewEnvironment.passthrough([
             "PATH": "/tmp/evil:/usr/bin", "DYLD_INSERT_LIBRARIES": "/tmp/evil.dylib", "HOME": "/Users/test",
             "SHELL": "/bin/zsh", "HTTP_PROXY": "http://127.0.0.1:7890", "https_proxy": "http://127.0.0.1:7890",

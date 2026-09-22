@@ -33,11 +33,19 @@ enum HomebrewEnvironment {
         environment.filter { isPassedThrough($0.key) }
     }
 
-    /// A login shell reads the profile files a Terminal window reads, without
-    /// the interactive startup; `env -0` ends each entry with NUL so a value
-    /// may contain anything, newlines included.
+    /// Printed immediately before the dump so the startup files' own output
+    /// can be told from it. Startup writes no trailing NUL, so without this the
+    /// greeting and the first entry arrive as one NUL-terminated run and that
+    /// entry is lost, and the first entry can be the proxy or mirror setting.
+    static let dumpMarker = "__VORSSAINT_ENV_DUMP__"
+
+    /// A login shell reads `~/.zprofile`; an interactive one also reads
+    /// `~/.zshrc`, which is where a proxy line is just as likely to live, so a
+    /// Terminal window's environment needs both. `env -0` ends each entry with
+    /// NUL so a value may contain anything, newlines included.
     static func loginShellCommand(shellPath: String) -> HomebrewCommand {
-        HomebrewCommand(executable: shellPath, arguments: ["-l", "-c", "/usr/bin/env -0"])
+        HomebrewCommand(executable: shellPath,
+                        arguments: ["-l", "-i", "-c", "printf %s \(dumpMarker); /usr/bin/env -0"])
     }
 
     static func exportsFromLoginShell(shellPath: String,
@@ -50,12 +58,20 @@ enum HomebrewEnvironment {
         return passthrough(parse(nullSeparated: result.output))
     }
 
-    /// An entry whose name is not an identifier is dropped: that is what a
-    /// startup file's greeting looks like once it is glued to the entry behind
-    /// it, and stdout and stderr arrive on the one pipe.
+    /// Everything up to and including the marker is whatever the startup files
+    /// wrote: a greeting, a warning about a tool that is gone, or a shell's own
+    /// "no job control" line, since stdout and stderr arrive on the one pipe.
+    /// The last occurrence is the real one: an earlier one can only be startup
+    /// echoing it, which belongs to the part being dropped. An entry whose name
+    /// is not an identifier is still dropped, which is what is left of a
+    /// greeting from a shell that never reached the marker at all.
     static func parse(nullSeparated data: Data) -> [String: String] {
         var environment: [String: String] = [:]
-        for entry in data.split(separator: 0) {
+        var dump = data[...]
+        if let marker = data.range(of: Data(dumpMarker.utf8), options: .backwards) {
+            dump = data[marker.upperBound...]
+        }
+        for entry in dump.split(separator: 0) {
             guard let separator = entry.firstIndex(of: UInt8(ascii: "=")) else { continue }
             let name = String(decoding: entry[entry.startIndex..<separator], as: UTF8.self)
             guard name.range(of: "^[A-Za-z_][A-Za-z0-9_]*$", options: .regularExpression) != nil else { continue }
