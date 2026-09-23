@@ -57,6 +57,9 @@ enum MenuPanelRecoveryTests {
         var contentViewController: Controller? = Controller()
         var fails = false
         var attempts = 0
+        // The animated close keeps the panel on screen until it finishes.
+        func performClose(_ sender: Any?) {}
+        func close() { isShown = false }
         func show(relativeTo: CGRect, of button: NSStatusBarButton, preferredEdge: NSRectEdge) {
             attempts += 1
             guard !fails, let window = button.window else { return }
@@ -153,10 +156,18 @@ enum MenuPanelRecoveryTests {
         func removePopoverDismissMonitor() { monitors = false }
         func installPopoverDismissMonitor() { monitors = true }
         func runPopoverCloseCompletions() {}
-        var activationSourceCaptures = 0
-        var activationHandbacks = 0
-        func rememberPanelActivationSource() { activationSourceCaptures += 1 }
-        func returnActivationAfterPanelClose() { activationHandbacks += 1 }
+        var popoverCloseReason: PanelCloseReason?
+        var popoverCloseCompletions: [() -> Void] = []
+        var activationTracking = false
+        var activationTrackingStarts = 0
+        var handbackReasons: [PanelCloseReason?] = []
+        func beginPanelActivationTracking() { activationTracking = true; activationTrackingStarts += 1 }
+        @discardableResult func endPanelActivationTracking() -> NSRunningApplication? {
+            activationTracking = false; return nil
+        }
+        func returnActivation(to source: NSRunningApplication?, after closeReason: PanelCloseReason?) {
+            handbackReasons.append(closeReason)
+        }
         func statusScreen(for button: NSStatusBarButton) -> NSScreen? { button.window?.screen }
         func configurePopoverWindow(_ window: NSWindow) {}
         func animatePopoverOpen(_ window: NSWindow) {}
@@ -191,6 +202,12 @@ enum MenuPanelRecoveryTests {
         }
         func close(_ host: Host) {
             host.popover.isShown = false
+            host.popoverWillClose(Notification(name: Notification.Name("willClose")))
+            host.popoverDidClose(Notification(name: Notification.Name("closed")))
+        }
+        // A close Vorssaint asks for itself, which marks it app requested.
+        func requestClose(_ host: Host, _ reason: PanelCloseReason) {
+            host.closePopoverNow(animated: false, reason: reason, completion: nil)
             host.popoverWillClose(Notification(name: Notification.Name("willClose")))
             host.popoverDidClose(Notification(name: Notification.Name("closed")))
         }
@@ -314,26 +331,57 @@ enum MenuPanelRecoveryTests {
             expect(!host.shouldDismissPopover(forLocalEvent: unrelatedEvent),
                    "interaction with unrelated window does not dismiss the popover")
         }
+        for reason in [PanelCloseReason.escape, .statusItem, .outsideClick, .action] {
+            let host = setup()
+            requestClose(host, reason)
+            expect(!host.popover.isShown && host.handbackReasons == [reason] && !host.activationTracking,
+                   "a \(reason) close ends activation tracking and passes its reason to the handback")
+        }
         do {
             let host = setup()
-            expect(host.activationSourceCaptures == 0, "a panel shown without activating remembers no app to return to")
-            host.popoverCloseIsAppRequested = true; close(host)
-            expect(host.activationHandbacks == 1, "closing the panel hands activation back once")
-            host.popoverIsClosing = false
+            host.closePopoverNow(animated: true, reason: .escape, completion: nil)
+            host.closePopoverNow(animated: true, reason: .action, completion: nil)
+            host.closePopoverNow(animated: true, reason: .statusItem, completion: nil)
+            host.popover.isShown = false
+            host.popoverWillClose(Notification(name: Notification.Name("willClose")))
+            host.popoverDidClose(Notification(name: Notification.Name("closed")))
+            expect(host.handbackReasons == [.action], "an action joining a dismissal keeps activation where it goes")
+        }
+        do {
+            let host = setup(); NSApp.currentEvent = event(age: 1); close(host)
+            expect(!host.popover.isShown && host.handbackReasons == [nil],
+                   "a close Vorssaint did not ask for carries no reason to hand activation back")
+        }
+        do {
+            let host = setup()
+            expect(host.activationTrackingStarts == 0, "a panel shown without activating remembers no app")
+            requestClose(host, .escape)
             host.showPopover(allowRecentClose: true, animate: false)
-            expect(host.activationSourceCaptures == 1, "a click that activates the panel remembers the app in front")
+            expect(host.activationTrackingStarts == 1 && host.activationTracking,
+                   "a click that activates the panel starts following the app in front")
+            requestClose(host, .escape)
+            expect(!host.activationTracking, "closing the panel stops following activation")
         }
         do {
-            let host = setup(); close(host)
-            expect(host.popover.isShown && host.activationHandbacks == 0,
-                   "a panel reopened in place after a foreign close keeps activation")
+            let host = setup(); host.activationTracking = true; close(host)
+            expect(host.popover.isShown && host.handbackReasons.isEmpty && host.activationTracking,
+                   "a panel reopened in place after a foreign close keeps activation and its tracking")
             DispatchQueue.main.drain()
-            host.popoverCloseIsAppRequested = true; close(host); DispatchQueue.main.drain()
-            expect(host.activationHandbacks == 1, "the close after a recovery still hands activation back")
+            requestClose(host, .escape); DispatchQueue.main.drain()
+            expect(host.handbackReasons == [.escape] && !host.activationTracking,
+                   "the close after a recovery still hands activation back")
         }
         do {
-            let host = setup(); host.popoverIsSwitchingAnchor = true; close(host)
-            expect(host.activationHandbacks == 0, "moving the panel between metric anchors keeps activation")
+            let host = setup(); host.activationTracking = true; host.popover.fails = true
+            close(host); DispatchQueue.main.drain()
+            expect(!host.popover.isShown && !host.activationTracking,
+                   "a recovery that fails to reopen stops following activation")
+        }
+        do {
+            let host = setup(); host.activationTracking = true
+            host.popoverIsSwitchingAnchor = true; requestClose(host, .statusItem)
+            expect(host.handbackReasons.isEmpty && host.activationTracking,
+                   "moving the panel between metric anchors keeps activation and its tracking")
         }
     }
 }
