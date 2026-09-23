@@ -10,7 +10,7 @@ import Foundation
 /// brew itself keeps (the filter in `bin/brew`) are handed on.
 enum HomebrewEnvironment {
     /// The app's own environment plus the login shell's proxy and HOMEBREW_*
-    /// exports. The first read runs the login shell and may take up to
+    /// exports. The first read runs the login shell and may take up to twice
     /// `loginShellTimeout`, so it belongs on a work queue; a shell that fails
     /// or stalls contributes nothing and brew runs as before.
     static let forBrew: [String: String] = ProcessInfo.processInfo.environment
@@ -39,23 +39,49 @@ enum HomebrewEnvironment {
     /// entry is lost, and the first entry can be the proxy or mirror setting.
     static let dumpMarker = "__VORSSAINT_ENV_DUMP__"
 
+    /// Set for both runs so a startup file can tell it is only being read for
+    /// its exports and skip slow or interactive work, the way editors that
+    /// resolve the shell environment do (VS Code sets
+    /// VSCODE_RESOLVING_ENVIRONMENT): `[[ -n $VORSSAINT_RESOLVING_ENVIRONMENT ]]`.
+    /// The run is a child of this app, so a protected folder a startup file
+    /// touches asks for access in Vorssaint's name, and `~/.zlogout` runs too.
+    static let resolvingVariable = "VORSSAINT_RESOLVING_ENVIRONMENT"
+
     /// A login shell reads `~/.zprofile`; an interactive one also reads
     /// `~/.zshrc`, which is where a proxy line is just as likely to live, so a
     /// Terminal window's environment needs both. `env -0` ends each entry with
     /// NUL so a value may contain anything, newlines included.
-    static func loginShellCommand(shellPath: String) -> HomebrewCommand {
+    static func loginShellCommand(shellPath: String, interactive: Bool = true) -> HomebrewCommand {
         HomebrewCommand(executable: shellPath,
-                        arguments: ["-l", "-i", "-c", "printf %s \(dumpMarker); /usr/bin/env -0"])
+                        arguments: (interactive ? ["-l", "-i"] : ["-l"])
+                            + ["-c", "printf %s \(dumpMarker); /usr/bin/env -0"])
     }
 
+    static func loginShellEnvironment(base: [String: String]) -> [String: String] {
+        base.merging([resolvingVariable: "1"]) { _, resolving in resolving }
+    }
+
+    /// A `.zshrc` that takes the shell over, a multiplexer autostart that
+    /// fails without a terminal and exits or an `exec` into another shell,
+    /// ends the interactive run before the marker. The plain login run still
+    /// finds the `~/.zprofile` exports then, so it is tried whenever the
+    /// interactive one gives no dump.
     static func exportsFromLoginShell(shellPath: String,
-                                      timeout: TimeInterval = loginShellTimeout) -> [String: String] {
+                                      timeout: TimeInterval = loginShellTimeout,
+                                      baseEnvironment: [String: String] = ProcessInfo.processInfo.environment)
+        -> [String: String] {
         guard !shellPath.isEmpty else { return [:] }
-        let command = loginShellCommand(shellPath: shellPath)
-        let result = BoundedProcessRunner.run(command.executable, command.arguments,
-                                              timeout: timeout, maxOutputBytes: 1024 * 1024)
-        guard result.status == 0, !result.timedOut else { return [:] }
-        return passthrough(parse(nullSeparated: result.output))
+        let environment = loginShellEnvironment(base: baseEnvironment)
+        for interactive in [true, false] {
+            let command = loginShellCommand(shellPath: shellPath, interactive: interactive)
+            let result = BoundedProcessRunner.run(command.executable, command.arguments,
+                                                  timeout: timeout, maxOutputBytes: 1024 * 1024,
+                                                  environment: environment)
+            guard result.status == 0, !result.timedOut,
+                  result.output.range(of: Data(dumpMarker.utf8)) != nil else { continue }
+            return passthrough(parse(nullSeparated: result.output))
+        }
+        return [:]
     }
 
     /// Everything up to and including the marker is whatever the startup files
