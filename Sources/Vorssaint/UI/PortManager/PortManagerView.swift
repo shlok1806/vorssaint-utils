@@ -109,6 +109,9 @@ struct PortManagerView: View {
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 4).padding(.vertical, 1.5)
                         .background(Color.primary.opacity(0.08), in: Capsule())
+                    if PortManagerSupport.listensOnAllInterfaces(entry.address) {
+                        PortManagerAllInterfacesBadge(strings: strings, fontSize: 9)
+                    }
                 }
                 Text(entry.processName)
                     .font(.system(size: 11))
@@ -135,5 +138,29 @@ struct PortManagerView: View {
             }
         }
         .padding(.vertical, 3)
+    }
+}
+
+/// Marks a listener bound to every interface, so the rows other machines on the
+/// network may reach stand out from the local-only ones. Local rows stay unmarked.
+struct PortManagerAllInterfacesBadge: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let strings: PortManagerFeatureStrings
+    let fontSize: CGFloat
+
+    var body: some View {
+        let tint = PanelMetricColor.orange(for: colorScheme)
+        HStack(spacing: 2.5) {
+            Image(systemName: "globe")
+            Text(strings.allInterfaces).lineLimit(1)
+        }
+        .font(.system(size: fontSize, weight: .bold, design: .rounded))
+        .foregroundStyle(tint)
+        .padding(.horizontal, 4).padding(.vertical, 1.5)
+        .background(tint.opacity(0.14), in: Capsule())
+        .help(strings.allInterfacesHelp)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(strings.allInterfaces)
+        .accessibilityHint(strings.allInterfacesHelp)
     }
 }
