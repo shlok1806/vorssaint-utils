@@ -545,6 +545,78 @@ enum PointerInputFeatureTests {
                 && !hidClick(.up, atMilliseconds: 3_500_280),
                "click debounce on HID ticks drops a 10 ms bounce and accepts a click 120 ms later")
 
+        // Keys this app posts right after a real press of the same key must
+        // not be taken for chatter. Quit Protection confirms a press by posting
+        // a copy of the hardware key down while the key is still held, and the
+        // copy keeps both the hardware timestamp and its source process id of 0.
+        let ownProcessID = Int64(getpid())
+        let hardwareKeyDown = CGEvent(keyboardEventSource: nil, virtualKey: 13, keyDown: true)
+        hardwareKeyDown?.setIntegerValueField(.eventSourceUnixProcessID, value: 0)
+        hardwareKeyDown?.timestamp = ticks(atMilliseconds: 3_599_990)
+        let quitProtectionCopy = hardwareKeyDown?.copy()
+        quitProtectionCopy?.setIntegerValueField(.eventSourceUserData, value: OwnKeyEvent.quitProtectionMarker)
+        suite.expect(hardwareKeyDown.map(OwnKeyEvent.isPosted) == false,
+               "a hardware key press still goes through key debounce")
+        suite.expect(quitProtectionCopy?.getIntegerValueField(.eventSourceUnixProcessID) == 0
+                && quitProtectionCopy?.timestamp == hardwareKeyDown?.timestamp
+                && quitProtectionCopy.map(OwnKeyEvent.isPosted) == true,
+               "the Quit Protection copy of a held key is recognised although it keeps the hardware pid and time")
+        func keyDownTime(_ event: CGEvent?) -> UInt64 {
+            event.map { event in
+                EventTimestamp.nanoseconds(raw: event.timestamp, nowTicks: nowTicks, timebase: appleSilicon)
+            } ?? 0
+        }
+        func heldKeyCopy(skippingOwnEvents: Bool) -> Bool {
+            debounceState.reset()
+            _ = debounceState.shouldSuppress(keyCode: 13, isAutoRepeat: false, event: .keyDown,
+                                             timestampNanoseconds: keyDownTime(hardwareKeyDown),
+                                             config: hidDebounceConfig)
+            if skippingOwnEvents, let copy = quitProtectionCopy, OwnKeyEvent.isPosted(copy) { return false }
+            return debounceState.shouldSuppress(keyCode: 13, isAutoRepeat: false, event: .keyDown,
+                                                timestampNanoseconds: keyDownTime(quitProtectionCopy),
+                                                config: hidDebounceConfig)
+        }
+        suite.expect(heldKeyCopy(skippingOwnEvents: false) && !heldKeyCopy(skippingOwnEvents: true),
+               "the confirmed close shortcut would fall in the held press's window unless own events skip debounce")
+        suite.expect(!debounceState.shouldSuppress(keyCode: 13, isAutoRepeat: false, event: .keyUp,
+                                                   timestampNanoseconds: keyDownTime(hardwareKeyDown) + 30_000_000,
+                                                   config: hidDebounceConfig)
+                && debounceState.shouldSuppress(keyCode: 13, isAutoRepeat: false, event: .keyDown,
+                                                timestampNanoseconds: keyDownTime(hardwareKeyDown) + 40_000_000,
+                                                config: hidDebounceConfig),
+               "skipping the copy leaves the real press in charge, so its bounce is still dropped")
+        let snippetSource = CGEventSource(stateID: .hidSystemState)
+        snippetSource?.userData = OwnKeyEvent.textSnippetMarker
+        let snippetKey = CGEvent(keyboardEventSource: snippetSource, virtualKey: 49, keyDown: true)
+        snippetKey?.setIntegerValueField(.eventSourceUnixProcessID, value: 0)
+        suite.expect(snippetKey.map(OwnKeyEvent.isPosted) == true,
+               "text a snippet retypes is recognised by its source marker alone")
+        suite.expect(OwnKeyEvent.isPosted(sourceProcessID: ownProcessID, userData: 0, ownProcessID: ownProcessID)
+                && !OwnKeyEvent.isPosted(sourceProcessID: 1, userData: 0, ownProcessID: ownProcessID)
+                && !OwnKeyEvent.isPosted(sourceProcessID: 0, userData: 0x564F, ownProcessID: ownProcessID),
+               "keys posted by this process skip debounce while other apps' posted keys do not")
+        // The tap callback needs the event chain, so its wiring is pinned as
+        // text: own events leave before the debounce state is consulted.
+        let keyboardDebounceCode = ((try? String(
+            contentsOfFile: "Sources/Vorssaint/Services/KeyboardDebounce/KeyboardDebounceService.swift",
+            encoding: .utf8)) ?? "")
+            .components(separatedBy: "\n")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+            .joined(separator: "\n")
+        let ownEventGuard = keyboardDebounceCode.range(of: "OwnKeyEvent.isPosted(event)")
+        let debounceDecision = keyboardDebounceCode.range(of: "state.shouldSuppress(")
+        suite.expect(ownEventGuard != nil && debounceDecision != nil
+                && ownEventGuard!.lowerBound < debounceDecision!.lowerBound,
+               "the key debounce tap lets this app's own keys through before debouncing")
+        for (poster, marker) in [("Sources/Vorssaint/Services/QuitProtection/QuitProtectionService.swift",
+                                  "OwnKeyEvent.quitProtectionMarker"),
+                                 ("Sources/Vorssaint/Services/Snippets/TextSnippetService.swift",
+                                  "OwnKeyEvent.textSnippetMarker")] {
+            let source = (try? String(contentsOfFile: poster, encoding: .utf8)) ?? ""
+            suite.expect(source.contains("syntheticMarker = \(marker)"),
+                   "\(poster) stamps the marker key debounce recognises")
+        }
+
         // MARK: Smooth scrolling
 
         suite.expect(SmoothScrollSupport.ticks(line: 1, fixedPoint: 1.0) == 1.0,
