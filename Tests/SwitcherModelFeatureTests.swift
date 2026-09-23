@@ -1840,6 +1840,25 @@ enum SwitcherModelFeatureTests {
         suite.expect(StatusItemAnchorSupport.anchorDriftX(clickX: 1240, reportedMidX: 1144, buttonWidth: 197) == nil,
                "clicks near the edge of a wide metrics item stay anchored to the item")
 
+        suite.expect(StatusItemAnchorSupport.shouldReturnActivation(to: 501, ownPID: 900, frontmostPID: 900,
+                                                                    ownWindowIsKey: false),
+               "closing the panel hands activation back to the app that was in front before it")
+        suite.expect(!StatusItemAnchorSupport.shouldReturnActivation(to: 501, ownPID: 900, frontmostPID: 777,
+                                                                     ownWindowIsKey: false),
+               "an app the person switched to while the panel was open keeps activation")
+        suite.expect(!StatusItemAnchorSupport.shouldReturnActivation(to: 501, ownPID: 900, frontmostPID: 900,
+                                                                     ownWindowIsKey: true),
+               "a Vorssaint window that took focus from the panel keeps Vorssaint active")
+        suite.expect(!StatusItemAnchorSupport.shouldReturnActivation(to: nil, ownPID: 900, frontmostPID: 900,
+                                                                     ownWindowIsKey: false),
+               "a panel opened while Vorssaint was already in front has nothing to hand back")
+        suite.expect(!StatusItemAnchorSupport.shouldReturnActivation(to: 900, ownPID: 900, frontmostPID: 900,
+                                                                     ownWindowIsKey: false),
+               "Vorssaint never hands activation back to itself")
+        suite.expect(!StatusItemAnchorSupport.shouldReturnActivation(to: 501, ownPID: 900, frontmostPID: nil,
+                                                                     ownWindowIsKey: false),
+               "no known frontmost app means nothing is taken from anyone")
+
         MenuPanelRecoveryTests.run { suite.expect($0, $1) }
 
         // The built-in display and a taller one placed to its left.

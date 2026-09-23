@@ -93,6 +93,21 @@ enum StatusItemAnchorSupport {
         return CGRect(origin: .zero, size: lastFrame.size).contains(event.locationInWindow)
     }
 
+    /// Opening the panel activates Vorssaint so its controls take keys, which
+    /// makes it the frontmost app for as long as nothing else claims focus.
+    /// Once the panel is gone, the app that was in front before it opened gets
+    /// activation back, unless the person has moved on: another app is already
+    /// in front, or one of Vorssaint's own windows (Settings, Feedback, an
+    /// editor) took focus from the panel.
+    static func shouldReturnActivation(to sourcePID: pid_t?,
+                                       ownPID: pid_t,
+                                       frontmostPID: pid_t?,
+                                       ownWindowIsKey: Bool) -> Bool {
+        guard let sourcePID, sourcePID > 0, sourcePID != ownPID,
+              frontmostPID == ownPID else { return false }
+        return !ownWindowIsKey
+    }
+
     /// Where an open panel belongs for a cached anchor: centered on the
     /// anchor's horizontal middle with its top edge held, so content that
     /// grows or shrinks (switching panel tabs) extends downward instead of

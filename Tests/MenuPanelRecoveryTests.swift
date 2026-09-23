@@ -147,6 +147,10 @@ enum MenuPanelRecoveryTests {
         func removePopoverDismissMonitor() { monitors = false }
         func installPopoverDismissMonitor() { monitors = true }
         func runPopoverCloseCompletions() {}
+        var activationSourceCaptures = 0
+        var activationHandbacks = 0
+        func rememberPanelActivationSource() { activationSourceCaptures += 1 }
+        func returnActivationAfterPanelClose() { activationHandbacks += 1 }
         func statusScreen(for button: NSStatusBarButton) -> NSScreen? { button.window?.screen }
         func configurePopoverWindow(_ window: NSWindow) {}
         func animatePopoverOpen(_ window: NSWindow) {}
@@ -247,6 +251,27 @@ enum MenuPanelRecoveryTests {
             expect(host.popoverLastFrame == window.frame, "later movement refreshes the recovery frame")
             host.popoverIsClosing = true; close(host)
             expect(NotificationCenter.default.observers.isEmpty, "normal close leaves no geometry observer")
+        }
+        do {
+            let host = setup()
+            expect(host.activationSourceCaptures == 0, "a panel shown without activating remembers no app to return to")
+            host.popoverIsClosing = true; close(host)
+            expect(host.activationHandbacks == 1, "closing the panel hands activation back once")
+            host.popoverIsClosing = false
+            host.showPopover(allowRecentClose: true, animate: false)
+            expect(host.activationSourceCaptures == 1, "a click that activates the panel remembers the app in front")
+        }
+        do {
+            let host = setup(); close(host)
+            expect(host.popover.isShown && host.activationHandbacks == 0,
+                   "a panel reopened in place after a foreign close keeps activation")
+            DispatchQueue.main.drain()
+            host.popoverIsClosing = true; close(host); DispatchQueue.main.drain()
+            expect(host.activationHandbacks == 1, "the close after a recovery still hands activation back")
+        }
+        do {
+            let host = setup(); host.popoverIsSwitchingAnchor = true; close(host)
+            expect(host.activationHandbacks == 0, "moving the panel between metric anchors keeps activation")
         }
     }
 }

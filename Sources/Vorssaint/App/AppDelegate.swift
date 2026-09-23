@@ -21,6 +21,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var popoverLastWindowNumber: Int?
     private var popoverForeignReopenAt = Date.distantPast
     private var popoverIsSwitchingAnchor = false
+    /// The app that was frontmost when a click opened the panel, so closing
+    /// the panel can hand activation back instead of leaving Vorssaint in front.
+    private var panelActivationSource: NSRunningApplication?
     private var metricAnchorSwitchSerial = 0
     private var popoverCloseCompletions: [() -> Void] = []
     private var isTerminating = false
@@ -932,6 +935,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             statusController.setMicBadgeHeld(false)
         }
         if activate {
+            rememberPanelActivationSource()
             NSApp.activate(ignoringOtherApps: true)
         }
         // Only arm the monitors and the anchor if the popover actually presented
@@ -1179,6 +1183,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         runPopoverCloseCompletions()
         if let recoveryAnchor {
             reopenPanelAfterForeignClose(anchor: recoveryAnchor)
+        } else if !popoverIsSwitchingAnchor {
+            returnActivationAfterPanelClose()
+        }
+    }
+
+    private func rememberPanelActivationSource() {
+        let front = NSWorkspace.shared.frontmostApplication
+        // Opened while Vorssaint was already in front (from Settings, say):
+        // there is nothing to hand back when the panel closes.
+        panelActivationSource = front?.processIdentifier == NSRunningApplication.current.processIdentifier
+            ? nil : front
+    }
+
+    /// Closing the panel leaves Vorssaint active, and macOS keeps reporting it
+    /// as the frontmost app until something else is focused, which misleads
+    /// window managers and anything that follows the active app.
+    private func returnActivationAfterPanelClose() {
+        guard let source = panelActivationSource else { return }
+        panelActivationSource = nil
+        // One turn later, so a window an action opened on its way out of the
+        // panel has become key and keeps the activation it asked for.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.popover.isShown, !source.isTerminated,
+                  StatusItemAnchorSupport.shouldReturnActivation(
+                      to: source.processIdentifier,
+                      ownPID: NSRunningApplication.current.processIdentifier,
+                      frontmostPID: NSWorkspace.shared.frontmostApplication?.processIdentifier,
+                      ownWindowIsKey: NSApp.keyWindow != nil || NSApp.modalWindow != nil)
+            else { return }
+            ActivationHandoff.yield(to: source)
+            if !source.activate(from: NSRunningApplication.current, options: []) {
+                source.activate(options: [])
+            }
         }
     }
 
