@@ -28,6 +28,26 @@ enum SpaceHopSupport {
         appHasWindowOnVisibleSpace ? .moveASpace : .waitForActivationTravel
     }
 
+    /// Whether an arrival pulse should run the focus pass again (issue #1733).
+    /// The first pulse always runs: it is the one Accessibility has to settle
+    /// for. A later pulse only repeats it when the earlier pass has not landed,
+    /// because raising a window that is already its app's focused window, with
+    /// that app in front, deactivates and reactivates it for nothing and reads
+    /// as a flicker. The frontmost app counts when it is either the target app
+    /// or the process that owns the window, such as an embedded helper.
+    static func arrivalPulseShouldFocus(isFirstPulse: Bool,
+                                        targetWindowID: CGWindowID,
+                                        targetPID: pid_t,
+                                        windowOwnerPID: pid_t,
+                                        frontmostPID: pid_t?,
+                                        focusedWindowID: @autoclosure () -> CGWindowID?) -> Bool {
+        guard !isFirstPulse else { return true }
+        guard let frontmostPID,
+              frontmostPID == targetPID || frontmostPID == windowOwnerPID
+        else { return true }
+        return focusedWindowID() != targetWindowID
+    }
+
     /// A window the window server places on at least one Space, none of which
     /// is visible right now, is a real window parked elsewhere. A window on no
     /// Space at all is a leftover surface (the ghosts the Accessibility veto
