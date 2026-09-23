@@ -171,7 +171,7 @@ struct PanelPortManagerView: View {
                         .padding(.horizontal, 4).padding(.vertical, 1.5)
                         .background(Color.primary.opacity(0.08), in: Capsule())
                     if PortManagerSupport.listensOnAllInterfaces(entry.address) {
-                        PortManagerAllInterfacesBadge(strings: strings, fontSize: 8.5)
+                        PortManagerAllInterfacesBadge(strings: strings, fontSize: 8.5, showsLabel: false)
                     }
                 }
                 Text(entry.processName)

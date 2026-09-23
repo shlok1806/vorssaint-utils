@@ -143,16 +143,21 @@ struct PortManagerView: View {
 
 /// Marks a listener bound to every interface, so the rows other machines on the
 /// network may reach stand out from the local-only ones. Local rows stay unmarked.
+/// The menu panel is too narrow for the label in most languages, so it shows the
+/// globe alone and leaves the label to the tooltip and VoiceOver.
 struct PortManagerAllInterfacesBadge: View {
     @Environment(\.colorScheme) private var colorScheme
     let strings: PortManagerFeatureStrings
     let fontSize: CGFloat
+    var showsLabel = true
 
     var body: some View {
         let tint = PanelMetricColor.orange(for: colorScheme)
         HStack(spacing: 2.5) {
             Image(systemName: "globe")
-            Text(strings.allInterfaces).lineLimit(1)
+            if showsLabel {
+                Text(strings.allInterfaces).lineLimit(1)
+            }
         }
         .font(.system(size: fontSize, weight: .bold, design: .rounded))
         .foregroundStyle(tint)
