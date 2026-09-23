@@ -7,17 +7,44 @@ import CoreGraphics
 /// Protected IDs are intersected with the actual own IDs from the same
 /// shareable-content snapshot, so stale window numbers cannot affect another app.
 enum ScreenshotCapturePolicy {
+    /// The app's own windows one capture has to keep out before the "Hide
+    /// Vorssaint windows" preference narrows what is left.
+    ///
+    /// Workflow surfaces — the selection overlays, the countdown and scrolling
+    /// HUDs and the quick preview — are the tool taking the capture and can
+    /// never be its subject, so they stay out whatever the preference says.
+    /// Content windows — editors and pinned captures — are ordinary windows
+    /// somebody left on screen, so the preference owns them (issue #780).
+    ///
+    /// Recording is exempt from that preference in
+    /// `ScreenshotSupport.unifiedCapturePolicy`, so it passes
+    /// `honoursVisibilityPreference: false` and keeps both kinds out.
+    static func protectedWindowIDs(workflowWindowIDs: Set<CGWindowID>,
+                                   contentWindowIDs: Set<CGWindowID>,
+                                   honoursVisibilityPreference: Bool) -> Set<CGWindowID> {
+        honoursVisibilityPreference
+            ? workflowWindowIDs
+            : workflowWindowIDs.union(contentWindowIDs)
+    }
+
     static func excludedWindowIDs(hideVorssaintWindows: Bool,
                                   ownWindowIDs: Set<CGWindowID>,
                                   protectedWindowIDs: Set<CGWindowID>) -> Set<CGWindowID> {
         hideVorssaintWindows ? ownWindowIDs : ownWindowIDs.intersection(protectedWindowIDs)
     }
 
+    /// Process names of window border tools. They draw transparent,
+    /// layer-zero windows over the real ones; picking one captures only the
+    /// painted border.
+    static let borderOverlayOwners: Set<String> = ["borders", "jankyborders"]
+
     static func canPickWindow(_ windowID: CGWindowID,
                               isOwnWindow: Bool,
                               hideVorssaintWindows: Bool,
-                              protectedWindowIDs: Set<CGWindowID>) -> Bool {
-        !isOwnWindow
+                              protectedWindowIDs: Set<CGWindowID>,
+                              ownerName: String? = nil) -> Bool {
+        if let ownerName, borderOverlayOwners.contains(ownerName.lowercased()) { return false }
+        return !isOwnWindow
             || (!hideVorssaintWindows && !protectedWindowIDs.contains(windowID))
     }
 
