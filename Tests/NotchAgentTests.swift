@@ -341,7 +341,9 @@ enum NotchAgentTests {
         suite.expect(usage?.tokens == AgentTokens(input: 11_943, cacheWrite: 0, cacheRead: 20_224, output: 156, reasoning: 7)
                         && usage?.model == "gpt-6-astra" && usage?.project == "web" && usage?.session == "s9",
                      "cached input is taken out of the input count and the turn's model is kept")
-        suite.expectClose(usage?.cost ?? -1, (11_943 * 10 + 20_224 * 1 + 156 * 50) / 1_000_000,
+        // Typed up front: Swift 6.0.3 cannot infer this literal arithmetic in time.
+        let listPriceCost: Double = (11_943 * 10 + 20_224 * 1 + 156 * 50) / 1_000_000
+        suite.expectClose(usage?.cost ?? -1, listPriceCost,
                           "a response is priced at its model's list price")
         let window = store.limits[.codex]?.windows.first
         suite.expect(window?.kind == .weekly && window?.usedPercent == 72 && window?.minutes == 10_080
