@@ -252,7 +252,7 @@ final class KeyboardDebounceService: ObservableObject {
 
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-        let timestamp = UInt64(event.timestamp)
+        let timestamp = EventTimestamp.nanoseconds(of: event)
         let eventKind: KeyboardDebounceState.EventKind = type == .keyDown ? .keyDown : .keyUp
         let shouldSuppress = eventLock.withLock {
             state.shouldSuppress(keyCode: keyCode,

@@ -464,6 +464,87 @@ enum PointerInputFeatureTests {
         suite.expect(!MouseNavigationSupport.shouldPassThrough(bundleIdentifier: nil),
                "an unknown frontmost app keeps the navigation behavior")
 
+        // MARK: Event timestamps at the HID tap (issue #1689)
+
+        // Apple Silicon ticks mach absolute time every 125/3 ns. At the HID
+        // stage hardware events carry those ticks, posted events nanoseconds.
+        let appleSilicon = EventTimestamp.Timebase(numer: 125, denom: 3)
+        let intel = EventTimestamp.Timebase(numer: 1, denom: 1)
+        func ticks(atMilliseconds milliseconds: UInt64) -> UInt64 {
+            milliseconds * 1_000_000 * 3 / 125
+        }
+        let nowTicks = ticks(atMilliseconds: 3_600_000)
+        suite.expect(EventTimestamp.nanoseconds(raw: ticks(atMilliseconds: 3_599_998),
+                                                nowTicks: nowTicks, timebase: appleSilicon)
+                == 3_599_998 * 1_000_000,
+               "a hardware event stamped in mach ticks reads as nanoseconds of uptime")
+        suite.expect(EventTimestamp.nanoseconds(raw: 3_599_999 * 1_000_000,
+                                                nowTicks: nowTicks, timebase: appleSilicon)
+                == 3_599_999 * 1_000_000,
+               "a posted event already stamped in nanoseconds keeps its value")
+        suite.expect(EventTimestamp.nanoseconds(raw: 3_599_999 * 1_000_000,
+                                                nowTicks: 3_600_000 * 1_000_000, timebase: intel)
+                == 3_599_999 * 1_000_000,
+               "a timebase of one nanosecond per tick passes timestamps through")
+        suite.expect(EventTimestamp.nanoseconds(ticks: 3_253_805_719_584, timebase: appleSilicon)
+                == 135_575_238_316_000
+                && EventTimestamp.nanoseconds(ticks: 3_251_232_217_924, timebase: appleSilicon)
+                == 135_468_009_080_166,
+               "tick conversion rounds down like the timestamps a session tap reports")
+        suite.expect(EventTimestamp.nanoseconds(ticks: .max, timebase: appleSilicon) == .max
+                && EventTimestamp.nanoseconds(raw: .max, nowTicks: nowTicks,
+                                              timebase: appleSilicon) == .max,
+               "a nonsense timestamp saturates instead of trapping inside an event tap")
+        let liveEvent = CGEvent(source: nil)
+        let liveTicks = mach_absolute_time()
+        liveEvent?.timestamp = liveTicks
+        let liveFromTicks = liveEvent.map(EventTimestamp.nanoseconds(of:))
+        let liveNanoseconds = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        liveEvent?.timestamp = liveNanoseconds
+        let liveFromNanoseconds = liveEvent.map(EventTimestamp.nanoseconds(of:))
+        suite.expect(liveFromTicks.map { $0 <= liveNanoseconds && liveNanoseconds - $0 < 1_000_000_000 }
+                == true
+                && liveFromNanoseconds == liveNanoseconds,
+               "events stamped with this Mac's mach clock or uptime nanoseconds share one clock")
+
+        // A 50 ms window measured in raw ticks would last about 2.1 s here.
+        let hidDebounceConfig = KeyboardDebounceConfig(enabled: true,
+                                                       globalWindowMs: 50,
+                                                       keyWindows: [:])
+        func hidKey(_ event: KeyboardDebounceState.EventKind, atMilliseconds milliseconds: UInt64) -> Bool {
+            debounceState.shouldSuppress(
+                keyCode: 0,
+                isAutoRepeat: false,
+                event: event,
+                timestampNanoseconds: EventTimestamp.nanoseconds(
+                    raw: ticks(atMilliseconds: milliseconds), nowTicks: nowTicks, timebase: appleSilicon),
+                config: hidDebounceConfig)
+        }
+        debounceState.reset()
+        suite.expect(!hidKey(.keyDown, atMilliseconds: 3_500_000)
+                && !hidKey(.keyUp, atMilliseconds: 3_500_060)
+                && hidKey(.keyDown, atMilliseconds: 3_500_080)
+                && !hidKey(.keyDown, atMilliseconds: 3_500_120)
+                && !hidKey(.keyUp, atMilliseconds: 3_500_180)
+                && !hidKey(.keyDown, atMilliseconds: 3_500_240),
+               "keyboard debounce on HID ticks drops a 20 ms bounce and accepts a press 60 ms after release")
+        clickState.reset()
+        func hidClick(_ event: MouseClickDebounceEvent, atMilliseconds milliseconds: UInt64) -> Bool {
+            clickState.shouldSuppress(
+                button: 0,
+                event: event,
+                timestampNanoseconds: EventTimestamp.nanoseconds(
+                    raw: ticks(atMilliseconds: milliseconds), nowTicks: nowTicks, timebase: appleSilicon),
+                config: clickConfig)
+        }
+        suite.expect(!hidClick(.down, atMilliseconds: 3_500_000)
+                && !hidClick(.up, atMilliseconds: 3_500_080)
+                && hidClick(.down, atMilliseconds: 3_500_090)
+                && hidClick(.up, atMilliseconds: 3_500_095)
+                && !hidClick(.down, atMilliseconds: 3_500_200)
+                && !hidClick(.up, atMilliseconds: 3_500_280),
+               "click debounce on HID ticks drops a 10 ms bounce and accepts a click 120 ms later")
+
         // MARK: Smooth scrolling
 
         suite.expect(SmoothScrollSupport.ticks(line: 1, fixedPoint: 1.0) == 1.0,
