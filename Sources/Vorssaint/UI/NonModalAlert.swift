@@ -6,11 +6,14 @@ import AppKit
 /// Shows an `NSAlert` in its own window, without a modal session.
 ///
 /// `runModal()` keeps the main run loop in the modal panel mode until the
-/// alert closes. Main-queue work and default-mode timers wait there, so a
-/// global shortcut pressed meanwhile only takes effect once the alert is
-/// dismissed, and a running recording's timer stops counting (issue #1665).
-/// The alert keeps its buttons, key equivalents, accessory view and the
-/// modal panel level; its response arrives in `completion` instead.
+/// alert closes, so default-mode timers stop meanwhile and a running
+/// recording's timer stops counting (issue #1665). The modal loop still runs
+/// main-queue blocks in that mode, unless it was started inside a main-queue
+/// block. The disk image installer opened both of its alerts inside such a
+/// block (the hop after the mount check and the one after the install), and
+/// that nesting held a global shortcut's work back until the alert was
+/// dismissed. The alert keeps its buttons, key equivalents, accessory view
+/// and the modal panel level; its response arrives in `completion` instead.
 final class NonModalAlert: NSObject {
     /// Open alerts own their presentation until they answer.
     private static var open: [NonModalAlert] = []
@@ -37,12 +40,19 @@ final class NonModalAlert: NSObject {
                         },
                         completion: @escaping (NSApplication.ModalResponse) -> Void) -> NonModalAlert {
         let presentation = NonModalAlert(alert: alert, retained: retained, completion: completion)
+        // An alert without buttons shows an OK button that `buttons` may not
+        // list, so nothing would point it at `respond`. Add that button here.
+        if alert.buttons.isEmpty {
+            alert.addButton(withTitle: Bundle(for: NSAlert.self)
+                .localizedString(forKey: "OK", value: "OK", table: "Common"))
+        }
         for button in alert.buttons {
             button.target = presentation
             button.action = #selector(respond(_:))
         }
         alert.layout()
         alert.window.level = .modalPanel
+        alert.window.hidesOnDeactivate = false
         open.append(presentation)
         show(alert.window)
         return presentation

@@ -180,8 +180,10 @@ final class DiskImageInstallerService {
         options.frame = NSRect(origin: .zero, size: options.fittingSize)
         alert.accessoryView = options
 
-        // Not runModal: a modal session holds back the app's shortcuts and
-        // timers until the alert closes (issue #1665).
+        // Not runModal: this runs inside a main-queue block (the hop after the
+        // mount check), and a modal loop started there holds back later
+        // main-queue work, such as shortcut actions, until the alert closes.
+        // Its modal panel mode also stops default-mode timers (issue #1665).
         NSApp.activate(ignoringOtherApps: true)
         installPrompt = NonModalAlert.present(alert, retaining: [destinationPrompt]) { [weak self] response in
             guard let self else { return }
@@ -406,6 +408,7 @@ final class DiskImageInstallerService {
                 alert.informativeText = strings.failedBody
             }
         }
+        // Not runModal either: this runs inside the hop after the install.
         NSApp.activate(ignoringOtherApps: true)
         NonModalAlert.present(alert) { _ in completion() }
     }

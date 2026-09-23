@@ -1333,10 +1333,12 @@ enum AppManagementFeatureTests {
         runNonModalAlertChecks(suite)
     }
 
-    /// The disk image installer's alerts used to run modal, which parks the
-    /// main run loop in the modal panel mode: main-queue work such as a Window
-    /// Layout shortcut waited there and ran only once the alert closed
-    /// (issue #1665). The alert is never ordered on screen here.
+    /// The disk image installer's alerts used to run modal inside a main-queue
+    /// block (the hop after the mount check and the one after the install).
+    /// A modal loop started there holds back later main-queue work, such as a
+    /// Window Layout shortcut, until the alert closes, and its modal panel
+    /// mode stops default-mode timers (issue #1665). The alert is never
+    /// ordered on screen here.
     private static func runNonModalAlertChecks(_ suite: TestSuite) {
         func makeAlert() -> NSAlert {
             let alert = NSAlert()
@@ -1365,6 +1367,8 @@ enum AppManagementFeatureTests {
         suite.expect(shownWindows.count == 1 && shownWindows.first === alert.window
                && alert.window.level == .modalPanel,
                "the alert shows its own window at the level a modal alert would use")
+        suite.expect(!alert.window.hidesOnDeactivate,
+               "the alert stays on screen when another app becomes active")
         suite.expect(alert.buttons.map(\.keyEquivalent) == ["\r", "\u{1b}"],
                "Return and Escape still answer the alert")
 
@@ -1379,6 +1383,15 @@ enum AppManagementFeatureTests {
         cancelled.buttons[1].performClick(nil)
         suite.expect(cancelResponses == [.alertSecondButtonReturn],
                "the second button answers with the second button's response")
+
+        let result = NSAlert()
+        result.messageText = "Installed"
+        var resultResponses: [NSApplication.ModalResponse] = []
+        let resultPresentation = NonModalAlert.present(result, show: { _ in }) { resultResponses.append($0) }
+        result.buttons.first?.performClick(nil)
+        suite.expect(result.buttons.count == 1 && result.buttons.first?.keyEquivalent == "\r"
+               && resultResponses == [.alertFirstButtonReturn] && !resultPresentation.isOpen,
+               "an alert without buttons answers through its OK button, like the installer's result alert")
 
         weak var weakTarget: NSObject?
         var dismissed: NonModalAlert?
