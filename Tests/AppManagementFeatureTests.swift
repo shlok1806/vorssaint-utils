@@ -1354,7 +1354,12 @@ enum AppManagementFeatureTests {
         let presentation = NonModalAlert.present(alert, show: { shownWindows.append($0) }) {
             responses.append($0)
         }
-        _ = RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.2))
+        // One pass of the run loop returns after the first source it handles,
+        // which on a busy runner need not be the main queue, so keep turning it.
+        let queuedWorkDeadline = Date(timeIntervalSinceNow: 2)
+        while !queuedWorkRan && Date() < queuedWorkDeadline {
+            _ = RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
+        }
         suite.expect(queuedWorkRan && responses.isEmpty && presentation.isOpen,
                "main-queue work runs while an installer alert is still waiting for an answer")
         suite.expect(shownWindows.count == 1 && shownWindows.first === alert.window
