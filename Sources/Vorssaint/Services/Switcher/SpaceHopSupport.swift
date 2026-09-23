@@ -34,14 +34,19 @@ enum SpaceHopSupport {
     /// because raising a window that is already its app's focused window, with
     /// that app in front, deactivates and reactivates it for nothing and reads
     /// as a flicker. The frontmost app counts when it is either the target app
-    /// or the process that owns the window, such as an embedded helper.
+    /// or the process that owns the window, such as an embedded helper. While
+    /// the window's Space is still hidden every pulse runs: when the "move a
+    /// space" shortcut is off or unreadable the pulses are the hop's last tries
+    /// to bring the window up, and the app can already be in front reporting
+    /// that window as focused before it has arrived.
     static func arrivalPulseShouldFocus(isFirstPulse: Bool,
+                                        targetSpaceIsVisible: @autoclosure () -> Bool,
                                         targetWindowID: CGWindowID,
                                         targetPID: pid_t,
                                         windowOwnerPID: pid_t,
                                         frontmostPID: pid_t?,
                                         focusedWindowID: @autoclosure () -> CGWindowID?) -> Bool {
-        guard !isFirstPulse else { return true }
+        guard !isFirstPulse, targetSpaceIsVisible() else { return true }
         guard let frontmostPID,
               frontmostPID == targetPID || frontmostPID == windowOwnerPID
         else { return true }
