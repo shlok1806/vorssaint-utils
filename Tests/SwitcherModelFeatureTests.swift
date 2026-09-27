@@ -1928,6 +1928,26 @@ enum SwitcherModelFeatureTests {
                                                                      ownWindowIsKey: false, closeReason: nil),
                "a close Vorssaint did not ask for leaves activation alone")
 
+        let showing: Set<UInt64> = [3, 7]
+        suite.expect(StatusItemAnchorSupport.handbackWouldSwitchDesktop(windowSpaces: [[1], [2]],
+                                                                        visibleSpaces: showing),
+               "an app whose windows are all on a desktop that is not showing is not handed activation")
+        suite.expect(!StatusItemAnchorSupport.handbackWouldSwitchDesktop(windowSpaces: [[1], [2, 7]],
+                                                                         visibleSpaces: showing),
+               "an app with a window on a desktop that is showing gets activation back")
+        suite.expect(!StatusItemAnchorSupport.handbackWouldSwitchDesktop(windowSpaces: [],
+                                                                         visibleSpaces: showing),
+               "an app with no windows open gets activation back")
+        suite.expect(!StatusItemAnchorSupport.handbackWouldSwitchDesktop(windowSpaces: [[]],
+                                                                         visibleSpaces: showing),
+               "a leftover surface on no desktop does not count as a window")
+        suite.expect(StatusItemAnchorSupport.handbackWouldSwitchDesktop(windowSpaces: [[], [1]],
+                                                                        visibleSpaces: showing),
+               "a leftover surface does not keep a window on a hidden desktop from counting")
+        suite.expect(!StatusItemAnchorSupport.handbackWouldSwitchDesktop(windowSpaces: [[1]],
+                                                                         visibleSpaces: nil),
+               "unknown desktops keep handing activation back")
+
         let ownApp: (Int) -> Bool = { $0 == 900 }
         suite.expect(StatusItemAnchorSupport.panelActivationSource(after: .appActivated(777), current: 501,
                                                                    isOwnApp: ownApp) == 777,

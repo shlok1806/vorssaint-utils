@@ -111,6 +111,23 @@ enum StatusItemAnchorSupport {
         return !ownWindowIsKey
     }
 
+    /// Whether handing activation back would pull the person to another
+    /// desktop. The app in front can have its windows only on a desktop that
+    /// is not showing, for example after a switch to an empty desktop before
+    /// the panel opened, and activating it then travels back there. Each entry
+    /// lists the Spaces of one of the app's windows. A window on no Space is a
+    /// leftover surface and does not count, so an app with no windows open
+    /// still gets activation back, and so does one whenever the visible Spaces
+    /// are unknown.
+    static func handbackWouldSwitchDesktop(windowSpaces: [[UInt64]],
+                                           visibleSpaces: Set<UInt64>?) -> Bool {
+        guard let visibleSpaces else { return false }
+        let windows = windowSpaces.filter { !$0.isEmpty }
+        return !windows.isEmpty && windows.allSatisfy {
+            SpaceHopSupport.isParkedOnHiddenSpace(windowSpaces: $0, visibleSpaces: visibleSpaces)
+        }
+    }
+
     /// The app to hand activation back to after a change seen while the panel
     /// is open. The panel joins every desktop and stays up when Vorssaint
     /// deactivates, so the person can move on without closing it. Another app
