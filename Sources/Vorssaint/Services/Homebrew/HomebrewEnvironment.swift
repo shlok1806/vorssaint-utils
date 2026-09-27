@@ -40,11 +40,10 @@ enum HomebrewEnvironment {
     static let dumpMarker = "__VORSSAINT_ENV_DUMP__"
 
     /// Set for both runs so a startup file can tell it is only being read for
-    /// its exports and skip slow or interactive work, the way editors that
-    /// resolve the shell environment do (VS Code sets
-    /// VSCODE_RESOLVING_ENVIRONMENT): `[[ -n $VORSSAINT_RESOLVING_ENVIRONMENT ]]`.
+    /// its exports and skip slow or interactive work, the way editors that read
+    /// the shell environment mark their run: `[[ -n $VORSSAINT_RESOLVING_ENVIRONMENT ]]`.
     /// The run is a child of this app, so a protected folder a startup file
-    /// touches asks for access in Vorssaint's name, and `~/.zlogout` runs too.
+    /// touches asks for access in Vorssaint's name.
     static let resolvingVariable = "VORSSAINT_RESOLVING_ENVIRONMENT"
 
     /// A login shell reads `~/.zprofile`; an interactive one also reads
@@ -65,7 +64,9 @@ enum HomebrewEnvironment {
     /// fails without a terminal and exits or an `exec` into another shell,
     /// ends the interactive run before the marker. The plain login run still
     /// finds the `~/.zprofile` exports then, so it is tried whenever the
-    /// interactive one gives no dump.
+    /// interactive one gives no dump. Both run in a session of their own, so
+    /// an app started from a terminal gets the same result as one started from
+    /// Finder instead of a shell stopped for trying to take that terminal over.
     static func exportsFromLoginShell(shellPath: String,
                                       timeout: TimeInterval = loginShellTimeout,
                                       baseEnvironment: [String: String] = ProcessInfo.processInfo.environment)
@@ -74,9 +75,9 @@ enum HomebrewEnvironment {
         let environment = loginShellEnvironment(base: baseEnvironment)
         for interactive in [true, false] {
             let command = loginShellCommand(shellPath: shellPath, interactive: interactive)
-            let result = BoundedProcessRunner.run(command.executable, command.arguments,
-                                                  timeout: timeout, maxOutputBytes: 1024 * 1024,
-                                                  environment: environment)
+            let result = BoundedProcessRunner.runInNewSession(command.executable, command.arguments,
+                                                              timeout: timeout, maxOutputBytes: 1024 * 1024,
+                                                              environment: environment)
             guard result.status == 0, !result.timedOut,
                   result.output.range(of: Data(dumpMarker.utf8)) != nil else { continue }
             return passthrough(parse(nullSeparated: result.output))

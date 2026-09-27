@@ -572,7 +572,7 @@ enum RepositoryFeatureTests {
         expectEqual(zshrcExports["HOMEBREW_SEEN_RESOLVING"] ?? "", "1",
                     "Homebrew's login shell exposes VORSSAINT_RESOLVING_ENVIRONMENT to startup files")
         // A multiplexer autostart that fails without a terminal and exits, or an exec into another shell.
-        for takeover in ["tmux_autostart_failed_without_a_terminal=1; exit 0", "exec /bin/sh -c true"] {
+        for takeover in ["multiplexer_autostart_failed_without_a_terminal=1; exit 0", "exec /bin/sh -c true"] {
             let fallbackExports = startupExports(zshrc: takeover + "\n")
             expectEqual(fallbackExports["HOMEBREW_API_DOMAIN"] ?? "", "https://mirror.example/api",
                         "Homebrew falls back to the plain login run when ~/.zshrc ends the shell early: \(takeover)")

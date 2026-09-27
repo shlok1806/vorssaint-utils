@@ -64,8 +64,8 @@ do not include private clipboard content.
 Homebrew inside Vorssaint uses the proxy and `HOMEBREW_*` settings your shell
 exports, so it reaches the same servers as Terminal. To find them, Vorssaint
 starts your login shell once per launch, the way Terminal does, which reads
-`~/.zprofile`, `~/.zshrc` and `~/.zlogout`. Because Vorssaint starts it, a
-startup file that reads a protected folder asks for access in Vorssaint's name.
+`~/.zprofile` and `~/.zshrc`. Because Vorssaint starts it, a startup file that
+reads a protected folder asks for access in Vorssaint's name.
 
 During that run `VORSSAINT_RESOLVING_ENVIRONMENT` is set to `1`. A startup file
 can check it to skip work that only makes sense in a terminal window, such as
