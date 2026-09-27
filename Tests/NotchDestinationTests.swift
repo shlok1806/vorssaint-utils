@@ -24,6 +24,13 @@ enum NotchDestinationContract {
         struct Reader { func rememberPasteTarget() {} }
     }
     enum QuickLauncherService { static var shared = QuickLauncherContract.Launcher() }
+    enum MenuPanelFocus {
+        static let shared = Focus()
+        final class Focus {
+            var normalRequests = 0
+            func showNormalPanel() { normalRequests += 1 }
+        }
+    }
     final class Timer {
         var running = true
         var syncs = 0
@@ -36,9 +43,14 @@ enum NotchDestinationContract {
         static let shared = Service()
         struct Service { func syncWithPreferences() {} }
     }
+    final class Brightness {
+        var syncs = 0
+        func syncWithPreferences() { syncs += 1 }
+    }
+    enum BrightnessService { static var shared = Brightness() }
 
     class State {
-        var acceptsSystemFeedback = true
+        var acceptsUserInteraction = true
         func collapse() { expanded = false }
         var hiddenInFullscreen = false
         var running = true
@@ -52,6 +64,9 @@ enum NotchDestinationContract {
         var expanded = false
         var showingAppPanel = false
         var showingSections = false
+        var sectionQuery = ""
+        var sectionRow = 0
+        var highlightedSection: NotchModule?
         var peeking = false
         var pinned = false
         var openedByHover = false
@@ -186,7 +201,11 @@ enum NotchDestinationContract {
         suite.expect(!service.showScratchpad() && !service.expanded,
                      "choosing a separate Scratchpad window leaves the island untouched")
         defaults.set(true, forKey: DefaultsKey.notchScratchpad)
-        service.acceptsSystemFeedback = false
+        service.hiddenInFullscreen = true
+        suite.expect(service.showScratchpad() && service.expanded,
+                     "a full-screen user shortcut opens Scratchpad despite hidden automatic feedback")
+        service.collapse()
+        service.acceptsUserInteraction = false
         suite.expect(!service.showScratchpad() && !service.expanded,
                      "an unavailable island hands Scratchpad opening back to its ordinary window")
     }
@@ -249,6 +268,33 @@ enum NotchDestinationContract {
                    "hiding the saved opening page falls back to an available page")
             defaults.set("", forKey: DefaultsKey.notchHiddenModules)
         }
+        for destination in NotchReopeningDestination.allCases {
+            defaults.set(destination.rawValue, forKey: DefaultsKey.notchHomeModule)
+            let service = Service()
+            service.open(.files)
+            service.expanded = false
+            let focusRequests = MenuPanelFocus.shared.normalRequests
+            service.open()
+            suite.expect(service.showingAppPanel == (destination == .appPanel)
+                   && service.showingSections == (destination == .explore),
+                   "reopening shows the selected app panel or Explore destination")
+            if destination == .explore {
+                suite.expect(service.highlightedSection == .files && service.sectionQuery.isEmpty,
+                       "reopening Explore highlights its current page for keyboard navigation")
+            }
+            suite.expect(MenuPanelFocus.shared.normalRequests - focusRequests == (destination == .appPanel ? 1 : 0),
+                   "only opening the app panel resets its panel focus")
+            service.expanded = false
+            service.open(.music)
+            suite.expect(service.selected == .music && !service.showingAppPanel && !service.showingSections,
+                   "explicit page navigation wins over a saved app panel or Explore destination")
+
+            service.expanded = false
+            service.compactActivity = .timer
+            service.open()
+            suite.expect(service.selected == .timer && !service.showingAppPanel && !service.showingSections,
+                   "a visible activity wins over a saved app panel or Explore destination")
+        }
         defaults.set("unknown-page", forKey: DefaultsKey.notchHomeModule)
         let invalid = Service()
         invalid.open()
@@ -268,7 +314,7 @@ enum NotchDestinationContract {
         for returnHome in [false, true] {
             defaults.set(returnHome, forKey: DefaultsKey.notchReturnHome)
             defaults.set(NotchModule.controls.rawValue, forKey: DefaultsKey.notchHomeModule)
-            for activity in [NotchCompactActivity.timer, .downloads, .music] {
+            for activity in [NotchCompactActivity.timer, .downloads, .calendar, .music] {
                 let service = Service()
                 service.open(.files)
                 service.expanded = false
@@ -319,10 +365,25 @@ enum NotchDestinationContract {
         let service = Service()
         NotchTimerService.shared = Timer()
         let timer = NotchTimerService.shared
+        // The production branch reads the brightness feature from the app's
+        // own defaults; keep it installed for these checks only.
+        let brightnessKey = AppFeature.brightness.availabilityKey
+        let previousBrightness = UserDefaults.standard.object(forKey: brightnessKey)
+        UserDefaults.standard.set(true, forKey: brightnessKey)
+        defer {
+            if let previousBrightness {
+                UserDefaults.standard.set(previousBrightness, forKey: brightnessKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: brightnessKey)
+            }
+        }
+        BrightnessService.shared = Brightness()
         service.updateSession { $0.displaysSleeping = true }
         suite.expect(timer.running && timer.suspensions == 0 && timer.syncs == 0
                && service.presentationTearDowns == 1 && !service.session.canPresent,
                "display sleep removes presentation while leaving the timer and alarm uninterrupted")
+        suite.expect(BrightnessService.shared.syncs == 1,
+               "the brightness keys go back to the system while the island is torn down")
         service.updateSession { $0.sleeping = true }
         suite.expect(!timer.running && timer.suspensions == 1 && service.presentationTearDowns == 1,
                "system sleep suspends the timer even after the display already hid the island")
